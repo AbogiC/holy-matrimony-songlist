@@ -1,8 +1,14 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSongsStore } from '../stores/songs'
 import { useAuthStore } from '../stores/auth'
+import {
+  DRIVE_ACCEPT,
+  isAllowedDriveFile,
+  preloadGoogleDrive,
+  uploadFileToDrive,
+} from '../services/googleDrive'
 
 const songsStore = useSongsStore()
 const authStore = useAuthStore()
@@ -13,10 +19,17 @@ const selectedCategory = ref('')
 const formOpen = ref(false)
 const editingId = ref(null)
 const saving = ref(false)
+const uploading = ref(false)
 const formError = ref('')
 const songForm = ref(emptySong())
+const selectedFile = ref(null)
+const fileInput = ref(null)
 
 const isEditing = computed(() => Boolean(editingId.value))
+
+onMounted(() => {
+  preloadGoogleDrive()
+})
 
 const filteredSongs = computed(() => {
   return songs.value.filter((song) => {
@@ -30,12 +43,28 @@ const filteredSongs = computed(() => {
 })
 
 function emptySong() {
-  return { title: '', artist: '', key: '', category: 'Classical', duration: '' }
+  return {
+    title: '',
+    artist: '',
+    key: '',
+    category: 'Classical',
+    duration: '',
+    fileId: '',
+    fileName: '',
+    fileUrl: '',
+    fileType: '',
+  }
+}
+
+function resetFileSelection() {
+  selectedFile.value = null
+  if (fileInput.value) fileInput.value.value = ''
 }
 
 function openAddForm() {
   editingId.value = null
   songForm.value = emptySong()
+  resetFileSelection()
   formError.value = ''
   formOpen.value = true
 }
@@ -48,7 +77,12 @@ function openEditForm(song) {
     key: song.key || '',
     category: song.category || 'Classical',
     duration: song.duration || '',
+    fileId: song.fileId || '',
+    fileName: song.fileName || '',
+    fileUrl: song.fileUrl || '',
+    fileType: song.fileType || '',
   }
+  resetFileSelection()
   formError.value = ''
   formOpen.value = true
 }
@@ -57,6 +91,33 @@ function closeForm() {
   formOpen.value = false
   editingId.value = null
   formError.value = ''
+  resetFileSelection()
+}
+
+function handleFileSelected(event) {
+  const file = event.target.files?.[0]
+
+  if (!file) {
+    resetFileSelection()
+    return
+  }
+
+  if (!isAllowedDriveFile(file)) {
+    formError.value = 'Only PDF or Word documents (.pdf, .doc, .docx) can be uploaded.'
+    resetFileSelection()
+    return
+  }
+
+  selectedFile.value = file
+  formError.value = ''
+}
+
+function handleRemoveAttachment() {
+  songForm.value.fileId = ''
+  songForm.value.fileName = ''
+  songForm.value.fileUrl = ''
+  songForm.value.fileType = ''
+  resetFileSelection()
 }
 
 async function handleSaveSong() {
@@ -68,6 +129,10 @@ async function handleSaveSong() {
     key: songForm.value.key.trim(),
     category: songForm.value.category,
     duration: songForm.value.duration.trim(),
+    fileId: songForm.value.fileId,
+    fileName: songForm.value.fileName,
+    fileUrl: songForm.value.fileUrl,
+    fileType: songForm.value.fileType,
   }
 
   if (!payload.title || !payload.artist) {
@@ -76,18 +141,30 @@ async function handleSaveSong() {
   }
 
   saving.value = true
+  uploading.value = false
   formError.value = ''
 
   try {
+    if (selectedFile.value) {
+      uploading.value = true
+      const uploaded = await uploadFileToDrive(selectedFile.value)
+      payload.fileId = uploaded.id
+      payload.fileName = uploaded.name
+      payload.fileUrl = uploaded.url
+      payload.fileType = uploaded.mimeType
+      uploading.value = false
+    }
+
     if (editingId.value) {
       await songsStore.updateSong(editingId.value, payload)
     } else {
       await songsStore.addSong(payload)
     }
     closeForm()
-  } catch {
-    formError.value = songsStore.error || 'Could not save this song.'
+  } catch (err) {
+    formError.value = err?.message || songsStore.error || 'Could not save this song.'
   } finally {
+    uploading.value = false
     saving.value = false
   }
 }
@@ -170,12 +247,54 @@ async function handleRemoveSong(song) {
             <option>Pop</option>
           </select>
           <input v-model="songForm.duration" placeholder="Duration" class="input-luxe" />
+          <div class="sm:col-span-2 lg:col-span-3 space-y-2">
+            <label class="block text-xs text-warm-gray tracking-[0.12em] uppercase">
+              Sheet Document (PDF / DOC only)
+            </label>
+            <input
+              ref="fileInput"
+              type="file"
+              :accept="DRIVE_ACCEPT"
+              class="block w-full text-sm text-warm-gray file:mr-4 file:px-4 file:py-2.5 
+                     file:rounded-sm file:border-0 file:bg-gold/10 file:text-gold-dark 
+                     file:text-sm hover:file:bg-gold/20 cursor-pointer"
+              @change="handleFileSelected"
+            />
+            <p v-if="selectedFile" class="text-xs text-warm-gray">
+              Ready to upload: <span class="text-charcoal">{{ selectedFile.name }}</span>
+            </p>
+            <p v-else-if="songForm.fileName" class="text-xs text-warm-gray flex items-center gap-2">
+              <a
+                :href="songForm.fileUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-gold-dark hover:text-gold underline"
+              >
+                {{ songForm.fileName }}
+              </a>
+              <button
+                type="button"
+                class="text-warm-gray hover:text-red-400 transition-colors"
+                @click="handleRemoveAttachment"
+              >
+                Remove
+              </button>
+            </p>
+          </div>
           <button
             class="btn-gold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             :disabled="saving"
             @click="handleSaveSong"
           >
-            {{ saving ? 'Saving…' : isEditing ? 'Update Song' : 'Save Song' }}
+            {{
+              uploading
+                ? 'Uploading to Drive…'
+                : saving
+                  ? 'Saving…'
+                  : isEditing
+                    ? 'Update Song'
+                    : 'Save Song'
+            }}
           </button>
         </div>
         <p v-if="formError" role="alert" class="mt-3 text-sm text-red-600">{{ formError }}</p>
@@ -206,6 +325,7 @@ async function handleRemoveSong(song) {
               <th class="text-left px-6 py-4 text-[10px] text-warm-gray tracking-[0.16em] uppercase font-medium">Key</th>
               <th class="text-left px-6 py-4 text-[10px] text-warm-gray tracking-[0.16em] uppercase font-medium">Category</th>
               <th class="text-left px-6 py-4 text-[10px] text-warm-gray tracking-[0.16em] uppercase font-medium">Duration</th>
+              <th class="text-left px-6 py-4 text-[10px] text-warm-gray tracking-[0.16em] uppercase font-medium">Document</th>
               <th v-if="authStore.canManage" class="px-6 py-4"></th>
             </tr>
           </thead>
@@ -219,6 +339,18 @@ async function handleRemoveSong(song) {
                 <span class="text-xs px-3 py-1 rounded-full bg-gold/10 text-gold-dark">{{ song.category }}</span>
               </td>
               <td data-label="Duration" class="px-6 py-4 text-sm text-warm-gray">{{ song.duration || '—' }}</td>
+              <td data-label="Document" class="px-6 py-4 text-sm">
+                <a
+                  v-if="song.fileUrl"
+                  :href="song.fileUrl"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-gold-dark hover:text-gold underline"
+                >
+                  Open
+                </a>
+                <span v-else class="text-warm-gray">—</span>
+              </td>
               <td data-label="Actions" v-if="authStore.canManage" class="px-6 py-4">
                 <div class="flex items-center justify-end gap-3">
                   <button

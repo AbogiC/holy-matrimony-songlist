@@ -31,6 +31,10 @@ function mapSong(snapshot) {
     key: data.key || '',
     category: data.category || 'Classical',
     duration: data.duration || '',
+    fileId: data.fileId || '',
+    fileName: data.fileName || '',
+    fileUrl: data.fileUrl || '',
+    fileType: data.fileType || '',
   }
 }
 
@@ -41,6 +45,10 @@ function buildSongPayload(song) {
     key: (song.key || '').trim(),
     category: song.category || 'Classical',
     duration: (song.duration || '').trim(),
+    fileId: song.fileId || '',
+    fileName: song.fileName || '',
+    fileUrl: song.fileUrl || '',
+    fileType: song.fileType || '',
   }
 }
 
