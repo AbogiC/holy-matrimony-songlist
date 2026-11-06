@@ -15,4 +15,22 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  build: {
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: 'firebase-auth',
+              test: /node_modules[\\/]@firebase[\\/]auth[\\/]/,
+            },
+            {
+              name: 'firebase-firestore',
+              test: /node_modules[\\/]@firebase[\\/]firestore[\\/]/,
+            },
+          ],
+        },
+      },
+    },
+  },
 })

@@ -177,6 +177,59 @@ export const useEventsStore = defineStore('events', () => {
     }
   }
 
+  async function moveSongInEvent(eventId, songId, direction) {
+    if (direction !== 'up' && direction !== 'down') {
+      throw new Error('Song order direction must be up or down.')
+    }
+
+    const event = getEventById(eventId)
+    if (!event) return
+
+    const songs = [...event.songs]
+    const index = songs.findIndex((song) => String(song.id) === String(songId))
+    const nextIndex = index + (direction === 'up' ? -1 : 1)
+
+    if (index < 0 || nextIndex < 0 || nextIndex >= songs.length) return
+
+    const songToMove = songs[index]
+    songs[index] = songs[nextIndex]
+    songs[nextIndex] = songToMove
+    error.value = ''
+
+    try {
+      await updateDoc(doc(db, EVENTS_COLLECTION, String(eventId)), {
+        songs,
+        updatedAt: serverTimestamp(),
+      })
+    } catch (err) {
+      error.value = getErrorMessage(err)
+      throw err
+    }
+  }
+
+  async function updateSongMoment(eventId, songId, moment) {
+    const event = getEventById(eventId)
+    const updatedMoment = (moment || '').trim()
+    const songs = event?.songs.map((song) =>
+      String(song.id) === String(songId) ? { ...song, moment: updatedMoment } : song
+    )
+
+    if (!event || !songs?.some((song) => String(song.id) === String(songId))) return
+    if (!updatedMoment) throw new Error('Moment is required.')
+
+    error.value = ''
+
+    try {
+      await updateDoc(doc(db, EVENTS_COLLECTION, String(eventId)), {
+        songs,
+        updatedAt: serverTimestamp(),
+      })
+    } catch (err) {
+      error.value = getErrorMessage(err)
+      throw err
+    }
+  }
+
   subscribe()
 
   return {
@@ -192,5 +245,7 @@ export const useEventsStore = defineStore('events', () => {
     removeEvent,
     addSongToEvent,
     removeSongFromEvent,
+    moveSongInEvent,
+    updateSongMoment,
   }
 })

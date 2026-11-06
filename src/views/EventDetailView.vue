@@ -17,6 +17,8 @@ const selectedSongId = ref('')
 const moment = ref('')
 const savingSong = ref(false)
 const songError = ref('')
+const editingMomentSongId = ref('')
+const momentDraft = ref('')
 
 const editingEvent = ref(false)
 const savingEvent = ref(false)
@@ -159,6 +161,48 @@ async function handleRemoveSong(song) {
     await eventsStore.removeSongFromEvent(event.value.id, song.id)
   } catch {
     songError.value = eventsStore.error || 'Could not remove this song.'
+  } finally {
+    savingSong.value = false
+  }
+}
+
+function openEditSongMoment(song) {
+  editingMomentSongId.value = String(song.id)
+  momentDraft.value = song.moment
+  songError.value = ''
+}
+
+function cancelEditSongMoment() {
+  editingMomentSongId.value = ''
+  momentDraft.value = ''
+}
+
+async function handleUpdateSongMoment(song) {
+  if (!authStore.canManage || !event.value || !momentDraft.value.trim()) return
+
+  savingSong.value = true
+  songError.value = ''
+
+  try {
+    await eventsStore.updateSongMoment(event.value.id, song.id, momentDraft.value)
+    cancelEditSongMoment()
+  } catch {
+    songError.value = eventsStore.error || 'Could not update this song moment.'
+  } finally {
+    savingSong.value = false
+  }
+}
+
+async function handleMoveSong(song, direction) {
+  if (!authStore.canManage || !event.value) return
+
+  savingSong.value = true
+  songError.value = ''
+
+  try {
+    await eventsStore.moveSongInEvent(event.value.id, song.id, direction)
+  } catch {
+    songError.value = eventsStore.error || 'Could not reorder the song program.'
   } finally {
     savingSong.value = false
   }
@@ -334,9 +378,13 @@ async function handleRemoveSong(song) {
         </div>
       </Transition>
 
+      <p v-if="songError && !showAddForm" role="alert" class="text-sm text-red-600 mb-4">
+        {{ songError }}
+      </p>
+
       <div v-if="event.songs.length" class="space-y-3">
         <div
-          v-for="song in event.songs"
+          v-for="(song, songIndex) in event.songs"
           :key="song.id"
           class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4 rounded-sm border border-champagne/30 hover:border-gold/40 hover:bg-champagne/10 transition-all duration-200"
         >
@@ -369,14 +417,84 @@ async function handleRemoveSong(song) {
               {{ song.moment }}
             </span>
           </component>
-          <button
-            v-if="authStore.canManage"
-            :disabled="savingSong"
-            @click="handleRemoveSong(song)"
-            class="self-end sm:self-auto text-warm-gray hover:text-red-400 transition-colors text-sm disabled:opacity-50"
+          <div v-if="authStore.canManage" class="flex items-center gap-2 self-end sm:self-auto">
+            <button
+              type="button"
+              :aria-label="`Move ${song.title} up`"
+              :title="`Move ${song.title} up`"
+              :disabled="savingSong || songIndex === 0"
+              @click="handleMoveSong(song, 'up')"
+              class="p-1 text-warm-gray hover:text-gold-dark transition-colors disabled:opacity-30"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m5 15 7-7 7 7" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              :aria-label="`Move ${song.title} down`"
+              :title="`Move ${song.title} down`"
+              :disabled="savingSong || songIndex === event.songs.length - 1"
+              @click="handleMoveSong(song, 'down')"
+              class="p-1 text-warm-gray hover:text-gold-dark transition-colors disabled:opacity-30"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m19 9-7 7-7-7" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              :aria-label="`Edit moment for ${song.title}`"
+              :title="`Edit moment for ${song.title}`"
+              :disabled="savingSong"
+              @click="openEditSongMoment(song)"
+              class="p-1 text-gold-dark hover:text-gold transition-colors disabled:opacity-50"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m16.862 4.487 2.651 2.651M8 16l8.5-8.5a2.121 2.121 0 0 1 3 3L11 19H8v-3Z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              :aria-label="`Remove ${song.title}`"
+              :title="`Remove ${song.title}`"
+              :disabled="savingSong"
+              @click="handleRemoveSong(song)"
+              class="p-1 text-warm-gray hover:text-red-400 transition-colors disabled:opacity-50"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16M10 11v6m4-6v6M5 7l1 13h12l1-13M9 7V4h6v3" />
+              </svg>
+            </button>
+          </div>
+          <form
+            v-if="authStore.canManage && editingMomentSongId === String(song.id)"
+            class="flex w-full flex-col gap-2 sm:flex-row"
+            @submit.prevent="handleUpdateSongMoment(song)"
           >
-            Remove
-          </button>
+            <input
+              v-model="momentDraft"
+              :aria-label="`Moment for ${song.title}`"
+              class="input-luxe"
+              maxlength="100"
+              required
+            />
+            <button
+              type="submit"
+              :disabled="savingSong || !momentDraft.trim()"
+              class="btn-gold text-sm disabled:opacity-50"
+            >
+              {{ savingSong ? 'Saving…' : 'Save moment' }}
+            </button>
+            <button
+              type="button"
+              :disabled="savingSong"
+              @click="cancelEditSongMoment"
+              class="text-sm text-warm-gray hover:text-charcoal disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </form>
         </div>
       </div>
       <div v-else class="py-10 text-center text-warm-gray text-sm">
