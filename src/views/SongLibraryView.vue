@@ -1,29 +1,105 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { useSongsStore } from '../stores/songs'
 import { storeToRefs } from 'pinia'
+import { useSongsStore } from '../stores/songs'
+import { useAuthStore } from '../stores/auth'
 
 const songsStore = useSongsStore()
+const authStore = useAuthStore()
 const { songs, categories } = storeToRefs(songsStore)
+
 const searchQuery = ref('')
 const selectedCategory = ref('')
-const showAddForm = ref(false)
-const newSong = ref({ title: '', artist: '', key: '', category: 'Classical', duration: '' })
+const formOpen = ref(false)
+const editingId = ref(null)
+const saving = ref(false)
+const formError = ref('')
+const songForm = ref(emptySong())
+
+const isEditing = computed(() => Boolean(editingId.value))
 
 const filteredSongs = computed(() => {
-  return songs.value.filter(song => {
-    const matchesSearch = song.title.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-                          song.artist.toLowerCase().includes(searchQuery.value.toLowerCase())
+  return songs.value.filter((song) => {
+    const query = searchQuery.value.toLowerCase()
+    const matchesSearch =
+      (song.title || '').toLowerCase().includes(query) ||
+      (song.artist || '').toLowerCase().includes(query)
     const matchesCategory = !selectedCategory.value || song.category === selectedCategory.value
     return matchesSearch && matchesCategory
   })
 })
 
-const handleAddSong = () => {
-  if (newSong.value.title && newSong.value.artist) {
-    songsStore.addSong({ ...newSong.value })
-    newSong.value = { title: '', artist: '', key: '', category: 'Classical', duration: '' }
-    showAddForm.value = false
+function emptySong() {
+  return { title: '', artist: '', key: '', category: 'Classical', duration: '' }
+}
+
+function openAddForm() {
+  editingId.value = null
+  songForm.value = emptySong()
+  formError.value = ''
+  formOpen.value = true
+}
+
+function openEditForm(song) {
+  editingId.value = song.id
+  songForm.value = {
+    title: song.title || '',
+    artist: song.artist || '',
+    key: song.key || '',
+    category: song.category || 'Classical',
+    duration: song.duration || '',
+  }
+  formError.value = ''
+  formOpen.value = true
+}
+
+function closeForm() {
+  formOpen.value = false
+  editingId.value = null
+  formError.value = ''
+}
+
+async function handleSaveSong() {
+  if (!authStore.canManage) return
+
+  const payload = {
+    title: songForm.value.title.trim(),
+    artist: songForm.value.artist.trim(),
+    key: songForm.value.key.trim(),
+    category: songForm.value.category,
+    duration: songForm.value.duration.trim(),
+  }
+
+  if (!payload.title || !payload.artist) {
+    formError.value = 'Title and artist are required.'
+    return
+  }
+
+  saving.value = true
+  formError.value = ''
+
+  try {
+    if (editingId.value) {
+      await songsStore.updateSong(editingId.value, payload)
+    } else {
+      await songsStore.addSong(payload)
+    }
+    closeForm()
+  } catch {
+    formError.value = songsStore.error || 'Could not save this song.'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function handleRemoveSong(song) {
+  if (!authStore.canManage) return
+  if (!window.confirm(`Remove "${song.title}" from the library?`)) return
+
+  try {
+    await songsStore.removeSong(song.id)
+  } catch {
+    // The store exposes the error message.
   }
 }
 </script>
@@ -49,34 +125,79 @@ const handleAddSong = () => {
           <option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option>
         </select>
       </div>
-      <button @click="showAddForm = !showAddForm" class="btn-gold text-sm w-full sm:w-auto">
-        {{ showAddForm ? 'Cancel' : '+ Add Song' }}
+      <button
+        v-if="authStore.canManage"
+        class="btn-gold text-sm w-full sm:w-auto"
+        @click="formOpen ? closeForm() : openAddForm()"
+      >
+        {{ formOpen ? 'Cancel' : '+ Add Song' }}
       </button>
     </div>
 
-    <!-- Add form -->
+    <!-- Guest notice -->
+    <div
+      v-if="!authStore.canManage"
+      class="card-luxe flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5"
+    >
+      <p class="text-sm text-warm-gray">
+        {{
+          authStore.isAuthenticated
+            ? 'Your account has guest access. Only administrators can add or remove songs.'
+            : 'You are viewing the song library as a guest. Sign in with an admin account to manage songs.'
+        }}
+      </p>
+      <RouterLink
+        v-if="!authStore.isAuthenticated"
+        to="/login"
+        class="btn-gold text-sm shrink-0 text-center"
+      >
+        Sign In
+      </RouterLink>
+    </div>
+
+    <!-- Add / edit form -->
     <Transition name="fade">
-      <div v-if="showAddForm" class="card-luxe p-6">
-        <h4 class="font-serif text-lg mb-4">Add New Song</h4>
+      <div v-if="formOpen && authStore.canManage" class="card-luxe p-6">
+        <h4 class="font-serif text-lg mb-4">{{ isEditing ? 'Edit Song' : 'Add New Song' }}</h4>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          <input v-model="newSong.title" placeholder="Title" class="input-luxe" />
-          <input v-model="newSong.artist" placeholder="Artist" class="input-luxe" />
-          <input v-model="newSong.key" placeholder="Key" class="input-luxe" />
-          <select v-model="newSong.category" class="input-luxe">
+          <input v-model="songForm.title" placeholder="Title" class="input-luxe" />
+          <input v-model="songForm.artist" placeholder="Artist" class="input-luxe" />
+          <input v-model="songForm.key" placeholder="Key" class="input-luxe" />
+          <select v-model="songForm.category" class="input-luxe">
             <option>Classical</option>
             <option>Contemporary</option>
             <option>Sacred</option>
             <option>Pop</option>
           </select>
-          <input v-model="newSong.duration" placeholder="Duration" class="input-luxe" />
-          <button @click="handleAddSong" class="btn-gold text-sm">Save Song</button>
+          <input v-model="songForm.duration" placeholder="Duration" class="input-luxe" />
+          <button
+            class="btn-gold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="saving"
+            @click="handleSaveSong"
+          >
+            {{ saving ? 'Saving…' : isEditing ? 'Update Song' : 'Save Song' }}
+          </button>
         </div>
+        <p v-if="formError" role="alert" class="mt-3 text-sm text-red-600">{{ formError }}</p>
       </div>
     </Transition>
 
+    <!-- Firestore error -->
+    <div
+      v-if="songsStore.error && !formOpen"
+      role="alert"
+      class="rounded-sm border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600"
+    >
+      {{ songsStore.error }}
+    </div>
+
     <!-- Song list -->
     <div class="card-luxe overflow-hidden">
-      <div class="overflow-x-auto">
+      <div v-if="songsStore.loading" class="p-12 text-center text-warm-gray text-sm">
+        Loading songs from Firestore…
+      </div>
+
+      <div v-else class="overflow-x-auto">
         <table class="w-full">
           <thead>
             <tr class="border-b border-champagne/30">
@@ -85,7 +206,7 @@ const handleAddSong = () => {
               <th class="text-left px-6 py-4 text-[10px] text-warm-gray tracking-[0.16em] uppercase font-medium">Key</th>
               <th class="text-left px-6 py-4 text-[10px] text-warm-gray tracking-[0.16em] uppercase font-medium">Category</th>
               <th class="text-left px-6 py-4 text-[10px] text-warm-gray tracking-[0.16em] uppercase font-medium">Duration</th>
-              <th class="px-6 py-4"></th>
+              <th v-if="authStore.canManage" class="px-6 py-4"></th>
             </tr>
           </thead>
           <tbody>
@@ -98,17 +219,31 @@ const handleAddSong = () => {
                 <span class="text-xs px-3 py-1 rounded-full bg-gold/10 text-gold-dark">{{ song.category }}</span>
               </td>
               <td data-label="Duration" class="px-6 py-4 text-sm text-warm-gray">{{ song.duration || '—' }}</td>
-              <td data-label="Actions" class="px-6 py-4">
-                <button @click="songsStore.removeSong(song.id)" 
-                        class="text-warm-gray hover:text-red-400 transition-colors text-sm">
-                  Remove
-                </button>
+              <td data-label="Actions" v-if="authStore.canManage" class="px-6 py-4">
+                <div class="flex items-center justify-end gap-3">
+                  <button
+                    class="text-gold-dark hover:text-gold transition-colors text-sm"
+                    @click="openEditForm(song)"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    class="text-warm-gray hover:text-red-400 transition-colors text-sm"
+                    @click="handleRemoveSong(song)"
+                  >
+                    Remove
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
-      <div v-if="filteredSongs.length === 0" class="p-12 text-center text-warm-gray text-sm">
+
+      <div
+        v-if="!songsStore.loading && filteredSongs.length === 0"
+        class="p-12 text-center text-warm-gray text-sm"
+      >
         No songs found. Add your first song to the library.
       </div>
     </div>

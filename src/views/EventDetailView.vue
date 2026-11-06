@@ -1,17 +1,29 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { useRoute, RouterLink } from 'vue-router'
+import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useEventsStore } from '../stores/events'
 import { useSongsStore } from '../stores/songs'
+import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
+const router = useRouter()
 const eventsStore = useEventsStore()
 const songsStore = useSongsStore()
+const authStore = useAuthStore()
 
 const event = computed(() => eventsStore.getEventById(route.params.id))
 const showAddForm = ref(false)
 const selectedSongId = ref('')
 const moment = ref('')
+const savingSong = ref(false)
+const songError = ref('')
+
+const editingEvent = ref(false)
+const savingEvent = ref(false)
+const eventError = ref('')
+const eventForm = ref({ couple: '', date: '', venue: '', status: 'planning' })
+
+const statuses = ['upcoming', 'planning', 'completed']
 
 const statusClasses = {
   upcoming: 'bg-gold/10 text-gold-dark',
@@ -21,8 +33,8 @@ const statusClasses = {
 
 const availableSongs = computed(() => {
   if (!event.value) return songsStore.songs
-  const assignedTitles = new Set(event.value.songs.map(song => song.title))
-  return songsStore.songs.filter(song => !assignedTitles.has(song.title))
+  const assignedTitles = new Set(event.value.songs.map((song) => song.title))
+  return songsStore.songs.filter((song) => !assignedTitles.has(song.title))
 })
 
 const formattedDate = computed(() => {
@@ -35,22 +47,116 @@ const formattedDate = computed(() => {
   })
 })
 
-function handleAddSong() {
+function openEditEvent() {
+  if (!event.value) return
+  eventForm.value = {
+    couple: event.value.couple,
+    date: event.value.date,
+    venue: event.value.venue,
+    status: event.value.status,
+  }
+  eventError.value = ''
+  editingEvent.value = true
+}
+
+function cancelEditEvent() {
+  editingEvent.value = false
+  eventError.value = ''
+}
+
+async function handleUpdateEvent() {
+  if (!authStore.canManage || !event.value) return
+
+  const payload = {
+    couple: eventForm.value.couple.trim(),
+    date: eventForm.value.date,
+    venue: eventForm.value.venue.trim(),
+    status: eventForm.value.status,
+  }
+
+  if (!payload.couple || !payload.date || !payload.venue) {
+    eventError.value = 'Couple, date, and venue are required.'
+    return
+  }
+
+  savingEvent.value = true
+  eventError.value = ''
+
+  try {
+    await eventsStore.updateEvent(event.value.id, payload)
+    editingEvent.value = false
+  } catch {
+    eventError.value = eventsStore.error || 'Could not update this event.'
+  } finally {
+    savingEvent.value = false
+  }
+}
+
+async function handleDeleteEvent() {
+  if (!authStore.canManage || !event.value) return
+  if (!window.confirm(`Delete the event for ${event.value.couple}?`)) return
+
+  savingEvent.value = true
+  eventError.value = ''
+
+  try {
+    await eventsStore.removeEvent(event.value.id)
+    await router.replace('/events')
+  } catch {
+    eventError.value = eventsStore.error || 'Could not delete this event.'
+  } finally {
+    savingEvent.value = false
+  }
+}
+
+async function handleAddSong() {
+  if (!authStore.canManage || !event.value) return
   if (!selectedSongId.value || !moment.value.trim()) return
-  const song = songsStore.songs.find(s => s.id === Number(selectedSongId.value))
+
+  const song = songsStore.songs.find((item) => String(item.id) === String(selectedSongId.value))
   if (!song) return
-  eventsStore.addSongToEvent(
-    event.value.id,
-    { title: song.title, artist: song.artist, moment: moment.value.trim() }
-  )
-  selectedSongId.value = ''
-  moment.value = ''
-  showAddForm.value = false
+
+  savingSong.value = true
+  songError.value = ''
+
+  try {
+    await eventsStore.addSongToEvent(event.value.id, {
+      title: song.title,
+      artist: song.artist,
+      moment: moment.value.trim(),
+    })
+    selectedSongId.value = ''
+    moment.value = ''
+    showAddForm.value = false
+  } catch {
+    songError.value = eventsStore.error || 'Could not assign this song.'
+  } finally {
+    savingSong.value = false
+  }
+}
+
+async function handleRemoveSong(song) {
+  if (!authStore.canManage || !event.value) return
+
+  savingSong.value = true
+  songError.value = ''
+
+  try {
+    await eventsStore.removeSongFromEvent(event.value.id, song.id)
+  } catch {
+    songError.value = eventsStore.error || 'Could not remove this song.'
+  } finally {
+    savingSong.value = false
+  }
 }
 </script>
 
 <template>
-  <div v-if="event" class="space-y-6">
+  <div v-if="eventsStore.loading" class="card-luxe p-12 text-center text-warm-gray text-sm">
+    Loading event from Firestore…
+  </div>
+
+  <div v-else-if="event" class="space-y-6">
     <!-- Back -->
     <RouterLink
       to="/events"
@@ -62,33 +168,102 @@ function handleAddSong() {
       Back to events
     </RouterLink>
 
-    <!-- Event summary -->
+    <!-- Event summary / edit -->
     <div class="card-luxe p-6 lg:p-8">
-      <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-        <div class="flex items-start gap-4">
-          <div class="w-14 h-14 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
-            <svg class="w-7 h-7 text-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.5"
-                d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
-              />
-            </svg>
-          </div>
-          <div>
-            <h3 class="font-serif text-2xl text-charcoal">{{ event.couple }}</h3>
-            <p class="text-sm text-warm-gray mt-1">{{ event.venue }}</p>
-            <p class="text-sm text-warm-gray mt-1">{{ formattedDate }}</p>
-          </div>
+      <form
+        v-if="editingEvent && authStore.canManage"
+        class="space-y-4"
+        @submit.prevent="handleUpdateEvent"
+      >
+        <h3 class="font-serif text-xl text-charcoal">Edit Event</h3>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <label class="block">
+            <span class="text-xs text-warm-gray tracking-wider uppercase">Couple</span>
+            <input v-model="eventForm.couple" class="input-luxe mt-2" />
+          </label>
+          <label class="block">
+            <span class="text-xs text-warm-gray tracking-wider uppercase">Date</span>
+            <input v-model="eventForm.date" type="date" class="input-luxe mt-2" />
+          </label>
+          <label class="block">
+            <span class="text-xs text-warm-gray tracking-wider uppercase">Venue</span>
+            <input v-model="eventForm.venue" class="input-luxe mt-2" />
+          </label>
+          <label class="block">
+            <span class="text-xs text-warm-gray tracking-wider uppercase">Status</span>
+            <select v-model="eventForm.status" class="input-luxe mt-2">
+              <option v-for="status in statuses" :key="status" :value="status">
+                {{ status.charAt(0).toUpperCase() + status.slice(1) }}
+              </option>
+            </select>
+          </label>
         </div>
-        <span
-          class="self-start text-xs px-3 py-1 rounded-full tracking-wider uppercase"
-          :class="statusClasses[event.status] || statusClasses.planning"
+        <div class="flex flex-wrap items-center gap-3">
+          <button
+            type="submit"
+            class="btn-gold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="savingEvent"
+          >
+            {{ savingEvent ? 'Saving…' : 'Save Changes' }}
+          </button>
+          <button
+            type="button"
+            class="text-sm text-warm-gray hover:text-charcoal transition-colors"
+            @click="cancelEditEvent"
+          >
+            Cancel
+          </button>
+        </div>
+        <p v-if="eventError" role="alert" class="text-sm text-red-600">{{ eventError }}</p>
+      </form>
+
+      <template v-else>
+        <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+          <div class="flex items-start gap-4">
+            <div class="w-14 h-14 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
+              <svg class="w-7 h-7 text-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.5"
+                  d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
+                />
+              </svg>
+            </div>
+            <div>
+              <h3 class="font-serif text-2xl text-charcoal">{{ event.couple }}</h3>
+              <p class="text-sm text-warm-gray mt-1">{{ event.venue }}</p>
+              <p class="text-sm text-warm-gray mt-1">{{ formattedDate }}</p>
+            </div>
+          </div>
+          <span
+            class="self-start text-xs px-3 py-1 rounded-full tracking-wider uppercase"
+            :class="statusClasses[event.status] || statusClasses.planning"
+          >
+            {{ event.status }}
+          </span>
+        </div>
+
+        <div
+          v-if="authStore.canManage"
+          class="mt-6 pt-4 border-t border-champagne/30 flex flex-wrap items-center gap-4"
         >
-          {{ event.status }}
-        </span>
-      </div>
+          <button
+            class="text-sm text-gold-dark hover:text-gold transition-colors"
+            @click="openEditEvent"
+          >
+            Edit Event
+          </button>
+          <button
+            class="text-sm text-warm-gray hover:text-red-400 transition-colors disabled:opacity-50"
+            :disabled="savingEvent"
+            @click="handleDeleteEvent"
+          >
+            Delete Event
+          </button>
+        </div>
+        <p v-if="eventError" role="alert" class="mt-3 text-sm text-red-600">{{ eventError }}</p>
+      </template>
     </div>
 
     <!-- Song program -->
@@ -100,13 +275,28 @@ function handleAddSong() {
             {{ event.songs.length }} song{{ event.songs.length === 1 ? '' : 's' }} arranged
           </p>
         </div>
-        <button @click="showAddForm = !showAddForm" class="btn-gold text-sm">
+        <button
+          v-if="authStore.canManage"
+          @click="showAddForm = !showAddForm"
+          class="btn-gold text-sm"
+        >
           {{ showAddForm ? 'Cancel' : '+ Assign Song' }}
         </button>
+        <RouterLink
+          v-else-if="!authStore.isAuthenticated"
+          to="/login"
+          class="text-sm text-gold hover:text-gold-dark tracking-wide"
+        >
+          Sign in to edit
+        </RouterLink>
+        <span v-else class="text-xs text-warm-gray tracking-wider uppercase">Admin only</span>
       </div>
 
       <Transition name="fade">
-        <div v-if="showAddForm" class="mb-6 p-4 rounded-sm border border-champagne/40 bg-champagne/5">
+        <div
+          v-if="showAddForm && authStore.canManage"
+          class="mb-6 p-4 rounded-sm border border-champagne/40 bg-champagne/5"
+        >
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <select v-model="selectedSongId" class="input-luxe sm:col-span-2">
               <option value="">Select a song from the library</option>
@@ -118,14 +308,15 @@ function handleAddSong() {
           </div>
           <button
             @click="handleAddSong"
-            :disabled="!selectedSongId || !moment.trim()"
+            :disabled="savingSong || !selectedSongId || !moment.trim()"
             class="btn-gold text-sm mt-4 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Add to Program
+            {{ savingSong ? 'Adding…' : 'Add to Program' }}
           </button>
           <p v-if="availableSongs.length === 0" class="text-xs text-warm-gray mt-3">
             All library songs are already assigned to this event.
           </p>
+          <p v-if="songError" role="alert" class="text-sm text-red-600 mt-3">{{ songError }}</p>
         </div>
       </Transition>
 
@@ -156,8 +347,10 @@ function handleAddSong() {
               {{ song.moment }}
             </span>
             <button
-              @click="eventsStore.removeSongFromEvent(event.id, song.id)"
-              class="text-warm-gray hover:text-red-400 transition-colors text-sm"
+              v-if="authStore.canManage"
+              :disabled="savingSong"
+              @click="handleRemoveSong(song)"
+              class="text-warm-gray hover:text-red-400 transition-colors text-sm disabled:opacity-50"
             >
               Remove
             </button>

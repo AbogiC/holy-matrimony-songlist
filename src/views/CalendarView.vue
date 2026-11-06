@@ -85,13 +85,24 @@ function selectDay(day) {
 
 <template>
   <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+    <div
+      v-if="eventsStore.error"
+      role="alert"
+      class="xl:col-span-3 rounded-sm border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600"
+    >
+      {{ eventsStore.error }}
+    </div>
+
     <!-- Calendar -->
     <div class="card-luxe p-6 xl:col-span-2">
       <div class="flex items-center justify-between mb-6">
         <div>
           <h3 class="font-serif text-xl text-charcoal">{{ monthLabel }}</h3>
           <p class="text-xs text-warm-gray tracking-wider uppercase mt-1">
-            {{ monthEvents.length }} event{{ monthEvents.length === 1 ? '' : 's' }} this month
+            <span v-if="eventsStore.loading">Loading events…</span>
+            <span v-else>
+              {{ monthEvents.length }} event{{ monthEvents.length === 1 ? '' : 's' }} this month
+            </span>
           </p>
         </div>
         <div class="flex items-center gap-2">

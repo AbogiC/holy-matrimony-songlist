@@ -1,71 +1,194 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { computed, ref } from 'vue'
+import {
+  addDoc,
+  arrayRemove,
+  arrayUnion,
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  updateDoc,
+} from 'firebase/firestore'
+import { db } from '../firebase/config'
+
+const EVENTS_COLLECTION = 'events'
+
+function getErrorMessage(error) {
+  if (error?.code === 'permission-denied') {
+    return 'Only administrators can change events.'
+  }
+  return error?.message || 'Something went wrong while syncing events.'
+}
+
+function mapEvent(snapshot) {
+  const data = snapshot.data()
+  return {
+    id: snapshot.id,
+    couple: data.couple || '',
+    date: data.date || '',
+    venue: data.venue || '',
+    status: data.status || 'planning',
+    songs: Array.isArray(data.songs) ? data.songs : [],
+  }
+}
+
+function buildEventPayload(event) {
+  return {
+    couple: (event.couple || '').trim(),
+    date: event.date || '',
+    venue: (event.venue || '').trim(),
+    status: event.status || 'planning',
+  }
+}
 
 export const useEventsStore = defineStore('events', () => {
-  const events = ref([
-    {
-      id: 1,
-      couple: 'Sarah & Michael',
-      date: '2026-06-15',
-      venue: 'St. Mary\'s Cathedral',
-      status: 'upcoming',
-      songs: [
-        { id: 1, title: 'Ave Maria', artist: 'Schubert', moment: 'Processional' },
-        { id: 2, title: 'Canon in D', artist: 'Pachelbel', moment: 'Bridal Entrance' },
-        { id: 3, title: 'The Prayer', artist: 'Bocelli & Dion', moment: 'Communion' },
-      ],
-    },
-    {
-      id: 2,
-      couple: 'Emily & James',
-      date: '2026-07-22',
-      venue: 'Garden Estate',
-      status: 'planning',
-      songs: [
-        { id: 4, title: 'Perfect', artist: 'Ed Sheeran', moment: 'First Dance' },
-      ],
-    },
-    {
-      id: 3,
-      couple: 'Olivia & David',
-      date: '2026-09-10',
-      venue: 'Cathedral Basilica',
-      status: 'completed',
-      songs: [],
-    },
-  ])
+  const events = ref([])
+  const loading = ref(true)
+  const error = ref('')
+
+  let unsubscribe = null
+  let started = false
 
   const upcomingEvents = computed(() =>
-    events.value.filter(e => e.status === 'upcoming' || e.status === 'planning')
+    events.value.filter((event) => event.status === 'upcoming' || event.status === 'planning')
   )
 
-  const getEventById = (id) => events.value.find(e => e.id === Number(id))
+  const getEventById = (id) => events.value.find((event) => String(event.id) === String(id))
 
-  const addEvent = (event) => {
-    events.value.push({ ...event, id: Date.now(), songs: [] })
+  function subscribe() {
+    if (started) return
+    started = true
+    loading.value = true
+
+    const eventsQuery = query(collection(db, EVENTS_COLLECTION), orderBy('date'))
+
+    unsubscribe = onSnapshot(
+      eventsQuery,
+      (snapshot) => {
+        events.value = snapshot.docs.map(mapEvent)
+        loading.value = false
+        error.value = ''
+      },
+      (err) => {
+        error.value = getErrorMessage(err)
+        loading.value = false
+      }
+    )
   }
 
-  const addSongToEvent = (eventId, song) => {
+  function stop() {
+    if (unsubscribe) {
+      unsubscribe()
+      unsubscribe = null
+    }
+    started = false
+  }
+
+  async function addEvent(event) {
+    error.value = ''
+
+    try {
+      const payload = {
+        ...buildEventPayload(event),
+        songs: [],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }
+      const ref = await addDoc(collection(db, EVENTS_COLLECTION), payload)
+      return ref.id
+    } catch (err) {
+      error.value = getErrorMessage(err)
+      throw err
+    }
+  }
+
+  async function updateEvent(id, event) {
+    error.value = ''
+
+    try {
+      await updateDoc(doc(db, EVENTS_COLLECTION, String(id)), {
+        ...buildEventPayload(event),
+        updatedAt: serverTimestamp(),
+      })
+    } catch (err) {
+      error.value = getErrorMessage(err)
+      throw err
+    }
+  }
+
+  async function removeEvent(id) {
+    error.value = ''
+
+    try {
+      await deleteDoc(doc(db, EVENTS_COLLECTION, String(id)))
+    } catch (err) {
+      error.value = getErrorMessage(err)
+      throw err
+    }
+  }
+
+  async function addSongToEvent(eventId, song) {
+    error.value = ''
+
+    const newSong = {
+      id:
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : String(Date.now()),
+      title: (song.title || '').trim(),
+      artist: (song.artist || '').trim(),
+      moment: (song.moment || '').trim(),
+    }
+
+    try {
+      await updateDoc(doc(db, EVENTS_COLLECTION, String(eventId)), {
+        songs: arrayUnion(newSong),
+        updatedAt: serverTimestamp(),
+      })
+      return newSong
+    } catch (err) {
+      error.value = getErrorMessage(err)
+      throw err
+    }
+  }
+
+  async function removeSongFromEvent(eventId, songId) {
     const event = getEventById(eventId)
-    if (event) event.songs.push({ ...song, id: Date.now() })
+    const song = event?.songs.find((item) => String(item.id) === String(songId))
+
+    if (!song) return
+
+    error.value = ''
+
+    try {
+      await updateDoc(doc(db, EVENTS_COLLECTION, String(eventId)), {
+        songs: arrayRemove({ ...song }),
+        updatedAt: serverTimestamp(),
+      })
+    } catch (err) {
+      error.value = getErrorMessage(err)
+      throw err
+    }
   }
 
-  const removeSongFromEvent = (eventId, songId) => {
-    const event = getEventById(eventId)
-    if (event) event.songs = event.songs.filter(s => s.id !== songId)
-  }
-
-  const removeEvent = (id) => {
-    events.value = events.value.filter(e => e.id !== Number(id))
-  }
+  subscribe()
 
   return {
     events,
+    loading,
+    error,
     upcomingEvents,
     getEventById,
+    subscribe,
+    stop,
     addEvent,
+    updateEvent,
+    removeEvent,
     addSongToEvent,
     removeSongFromEvent,
-    removeEvent,
   }
 })

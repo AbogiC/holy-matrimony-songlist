@@ -1,27 +1,142 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { computed, ref } from 'vue'
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  updateDoc,
+} from 'firebase/firestore'
+import { db } from '../firebase/config'
+
+const SONGS_COLLECTION = 'songs'
+
+function getErrorMessage(error) {
+  if (error?.code === 'permission-denied') {
+    return 'Only administrators can change songs.'
+  }
+  return error?.message || 'Something went wrong while syncing songs.'
+}
+
+function mapSong(snapshot) {
+  const data = snapshot.data()
+  return {
+    id: snapshot.id,
+    title: data.title || '',
+    artist: data.artist || '',
+    key: data.key || '',
+    category: data.category || 'Classical',
+    duration: data.duration || '',
+  }
+}
+
+function buildSongPayload(song) {
+  return {
+    title: (song.title || '').trim(),
+    artist: (song.artist || '').trim(),
+    key: (song.key || '').trim(),
+    category: song.category || 'Classical',
+    duration: (song.duration || '').trim(),
+  }
+}
 
 export const useSongsStore = defineStore('songs', () => {
-  const songs = ref([
-    { id: 1, title: 'Ave Maria', artist: 'Franz Schubert', key: 'Bb Major', category: 'Classical', duration: '4:30' },
-    { id: 2, title: 'Canon in D', artist: 'Johann Pachelbel', key: 'D Major', category: 'Classical', duration: '5:00' },
-    { id: 3, title: 'The Prayer', artist: 'Andrea Bocelli & Celine Dion', key: 'F Major', category: 'Contemporary', duration: '4:15' },
-    { id: 4, title: 'Perfect', artist: 'Ed Sheeran', key: 'Ab Major', category: 'Pop', duration: '4:23' },
-    { id: 5, title: 'Jesu, Joy of Man\'s Desiring', artist: 'J.S. Bach', key: 'G Major', category: 'Classical', duration: '3:45' },
-    { id: 6, title: 'All of Me', artist: 'John Legend', key: 'Ab Major', category: 'Contemporary', duration: '4:30' },
-    { id: 7, title: 'Panis Angelicus', artist: 'César Franck', key: 'A Major', category: 'Sacred', duration: '4:00' },
-    { id: 8, title: 'Marry You', artist: 'Bruno Mars', key: 'F Major', category: 'Pop', duration: '3:50' },
+  const songs = ref([])
+  const loading = ref(true)
+  const error = ref('')
+
+  let unsubscribe = null
+  let started = false
+
+  const categories = computed(() => [
+    ...new Set(songs.value.map((song) => song.category).filter(Boolean)),
   ])
 
-  const categories = computed(() => [...new Set(songs.value.map(s => s.category))])
+  function subscribe() {
+    if (started) return
+    started = true
+    loading.value = true
 
-  const addSong = (song) => {
-    songs.value.push({ ...song, id: Date.now() })
+    const songsQuery = query(collection(db, SONGS_COLLECTION), orderBy('title'))
+
+    unsubscribe = onSnapshot(
+      songsQuery,
+      (snapshot) => {
+        songs.value = snapshot.docs.map(mapSong)
+        loading.value = false
+        error.value = ''
+      },
+      (err) => {
+        error.value = getErrorMessage(err)
+        loading.value = false
+      }
+    )
   }
 
-  const removeSong = (id) => {
-    songs.value = songs.value.filter(s => s.id !== id)
+  function stop() {
+    if (unsubscribe) {
+      unsubscribe()
+      unsubscribe = null
+    }
+    started = false
   }
 
-  return { songs, categories, addSong, removeSong }
+  async function addSong(song) {
+    error.value = ''
+
+    try {
+      const ref = await addDoc(collection(db, SONGS_COLLECTION), {
+        ...buildSongPayload(song),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+      return ref.id
+    } catch (err) {
+      error.value = getErrorMessage(err)
+      throw err
+    }
+  }
+
+  async function updateSong(id, song) {
+    error.value = ''
+
+    try {
+      await updateDoc(doc(db, SONGS_COLLECTION, String(id)), {
+        ...buildSongPayload(song),
+        updatedAt: serverTimestamp(),
+      })
+    } catch (err) {
+      error.value = getErrorMessage(err)
+      throw err
+    }
+  }
+
+  async function removeSong(id) {
+    error.value = ''
+
+    try {
+      await deleteDoc(doc(db, SONGS_COLLECTION, String(id)))
+    } catch (err) {
+      error.value = getErrorMessage(err)
+      throw err
+    }
+  }
+
+  subscribe()
+
+  return {
+    songs,
+    categories,
+    loading,
+    error,
+    subscribe,
+    stop,
+    addSong,
+    updateSong,
+    removeSong,
+  }
 })

@@ -6,11 +6,11 @@ import AppHeader from './components/AppHeader.vue'
 
 const route = useRoute()
 const sidebarOpen = ref(false)
-const isPublicPage = computed(() => route.meta.public === true)
+const isAuthPage = computed(() => route.meta.authPage === true)
 </script>
 
 <template>
-  <RouterView v-if="isPublicPage" />
+  <RouterView v-if="isAuthPage" />
 
   <div v-else class="min-h-screen flex bg-ivory">
     <AppSidebar :open="sidebarOpen" @close="sidebarOpen = false" />

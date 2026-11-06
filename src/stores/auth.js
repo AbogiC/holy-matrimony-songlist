@@ -50,6 +50,8 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAuthenticated = computed(() => Boolean(user.value))
   const role = computed(() => profile.value?.role || DEFAULT_ROLE)
+  const isAdmin = computed(() => role.value === 'admin')
+  const canManage = computed(() => isAuthenticated.value && isAdmin.value)
   const displayName = computed(
     () => profile.value?.name || user.value?.displayName || user.value?.email || 'Guest'
   )
@@ -254,6 +256,8 @@ export const useAuthStore = defineStore('auth', () => {
     error,
     isAuthenticated,
     role,
+    isAdmin,
+    canManage,
     displayName,
     email,
     photoURL,

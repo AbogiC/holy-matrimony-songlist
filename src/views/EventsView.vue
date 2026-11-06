@@ -1,11 +1,15 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useEventsStore } from '../stores/events'
+import { useAuthStore } from '../stores/auth'
 
 const eventsStore = useEventsStore()
+const authStore = useAuthStore()
 const searchQuery = ref('')
 const selectedStatus = ref('')
 const showAddForm = ref(false)
+const saving = ref(false)
+const formError = ref('')
 const newEvent = ref({ couple: '', date: '', venue: '', status: 'planning' })
 
 const statuses = ['upcoming', 'planning', 'completed']
@@ -37,11 +41,32 @@ function formatDate(date) {
   })
 }
 
-function handleAddEvent() {
-  if (newEvent.value.couple && newEvent.value.date && newEvent.value.venue) {
-    eventsStore.addEvent({ ...newEvent.value })
+async function handleAddEvent() {
+  if (!authStore.canManage) return
+
+  const payload = {
+    couple: newEvent.value.couple.trim(),
+    date: newEvent.value.date,
+    venue: newEvent.value.venue.trim(),
+    status: newEvent.value.status,
+  }
+
+  if (!payload.couple || !payload.date || !payload.venue) {
+    formError.value = 'Couple, date, and venue are required.'
+    return
+  }
+
+  saving.value = true
+  formError.value = ''
+
+  try {
+    await eventsStore.addEvent(payload)
     newEvent.value = { couple: '', date: '', venue: '', status: 'planning' }
     showAddForm.value = false
+  } catch {
+    formError.value = eventsStore.error || 'Could not create this event.'
+  } finally {
+    saving.value = false
   }
 }
 </script>
@@ -64,14 +89,39 @@ function handleAddEvent() {
           </option>
         </select>
       </div>
-      <button @click="showAddForm = !showAddForm" class="btn-gold text-sm w-full sm:w-auto">
+      <button
+        v-if="authStore.canManage"
+        @click="showAddForm = !showAddForm"
+        class="btn-gold text-sm w-full sm:w-auto"
+      >
         {{ showAddForm ? 'Cancel' : '+ New Event' }}
       </button>
     </div>
 
+    <!-- Guest notice -->
+    <div
+      v-if="!authStore.canManage"
+      class="card-luxe flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5"
+    >
+      <p class="text-sm text-warm-gray">
+        {{
+          authStore.isAuthenticated
+            ? 'Your account has guest access. Only administrators can create events.'
+            : 'You are viewing matrimony events as a guest. Sign in with an admin account to manage events.'
+        }}
+      </p>
+      <RouterLink
+        v-if="!authStore.isAuthenticated"
+        to="/login"
+        class="btn-gold text-sm shrink-0 text-center"
+      >
+        Sign In
+      </RouterLink>
+    </div>
+
     <!-- Add form -->
     <Transition name="fade">
-      <div v-if="showAddForm" class="card-luxe p-6">
+      <div v-if="showAddForm && authStore.canManage" class="card-luxe p-6">
         <h4 class="font-serif text-lg mb-4">Create Matrimony Event</h4>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <input v-model="newEvent.couple" placeholder="Couple (e.g. Anna & John)" class="input-luxe" />
@@ -82,13 +132,33 @@ function handleAddEvent() {
               {{ status.charAt(0).toUpperCase() + status.slice(1) }}
             </option>
           </select>
-          <button @click="handleAddEvent" class="btn-gold text-sm">Save Event</button>
+          <button
+            class="btn-gold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="saving"
+            @click="handleAddEvent"
+          >
+            {{ saving ? 'Saving…' : 'Save Event' }}
+          </button>
         </div>
+        <p v-if="formError" role="alert" class="mt-3 text-sm text-red-600">{{ formError }}</p>
       </div>
     </Transition>
 
+    <!-- Firestore error -->
+    <div
+      v-if="eventsStore.error && !showAddForm"
+      role="alert"
+      class="rounded-sm border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600"
+    >
+      {{ eventsStore.error }}
+    </div>
+
+    <div v-if="eventsStore.loading" class="card-luxe p-12 text-center text-warm-gray text-sm">
+      Loading events from Firestore…
+    </div>
+
     <!-- Event list -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+    <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-5">
       <RouterLink
         v-for="event in filteredEvents"
         :key="event.id"
@@ -137,7 +207,10 @@ function handleAddEvent() {
       </RouterLink>
     </div>
 
-    <div v-if="filteredEvents.length === 0" class="card-luxe p-12 text-center text-warm-gray text-sm">
+    <div
+      v-if="!eventsStore.loading && filteredEvents.length === 0"
+      class="card-luxe p-12 text-center text-warm-gray text-sm"
+    >
       No events found. Create your first matrimony event.
     </div>
   </div>
