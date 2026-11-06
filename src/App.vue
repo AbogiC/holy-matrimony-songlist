@@ -1,13 +1,18 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import AppSidebar from './components/AppSidebar.vue'
 import AppHeader from './components/AppHeader.vue'
 
+const route = useRoute()
 const sidebarOpen = ref(false)
+const isPublicPage = computed(() => route.meta.public === true)
 </script>
 
 <template>
-  <div class="min-h-screen flex bg-ivory">
+  <RouterView v-if="isPublicPage" />
+
+  <div v-else class="min-h-screen flex bg-ivory">
     <AppSidebar :open="sidebarOpen" @close="sidebarOpen = false" />
     <Transition name="page">
       <div

@@ -1,11 +1,13 @@
 <script setup>
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
+import { useAuthStore } from '../stores/auth'
+
+const authStore = useAuthStore()
 
 const profile = ref({
-  name: 'Ava Bennett',
-  email: 'ava@holymatrimony.com',
-  role: 'Music Director',
-  parish: 'St. Mary\'s Cathedral',
+  name: '',
+  email: '',
+  parish: '',
 })
 
 const preferences = ref({
@@ -17,11 +19,30 @@ const preferences = ref({
 
 const saved = ref(false)
 
-function saveSettings() {
-  saved.value = true
-  window.setTimeout(() => {
-    saved.value = false
-  }, 2500)
+onMounted(() => {
+  profile.value = {
+    name: authStore.displayName === 'Guest' ? '' : authStore.displayName,
+    email: authStore.email,
+    parish: authStore.profile?.parish || '',
+  }
+})
+
+async function saveSettings() {
+  saved.value = false
+
+  try {
+    await authStore.updateUserProfile({
+      name: profile.value.name.trim() || authStore.displayName,
+      parish: profile.value.parish.trim(),
+    })
+    saved.value = true
+
+    window.setTimeout(() => {
+      saved.value = false
+    }, 2500)
+  } catch {
+    // The auth store exposes the error message.
+  }
 }
 </script>
 
@@ -30,14 +51,22 @@ function saveSettings() {
     <!-- Profile -->
     <div class="card-luxe p-6 lg:p-8">
       <div class="flex items-start gap-4 mb-6">
-        <div class="w-14 h-14 rounded-full bg-gold/20 flex items-center justify-center">
-          <span class="text-lg font-medium text-gold-dark">
-            {{ profile.name.charAt(0) }}
-          </span>
+        <img
+          v-if="authStore.photoURL"
+          :src="authStore.photoURL"
+          :alt="authStore.displayName"
+          class="w-14 h-14 rounded-full object-cover ring-1 ring-gold/20"
+          referrerpolicy="no-referrer"
+        />
+        <div
+          v-else
+          class="w-14 h-14 rounded-full bg-gradient-to-br from-champagne to-gold/25 flex items-center justify-center"
+        >
+          <span class="text-lg font-medium text-gold-dark">{{ authStore.initials }}</span>
         </div>
         <div>
           <h3 class="font-serif text-xl text-charcoal">Profile</h3>
-          <p class="text-sm text-warm-gray mt-1">Manage your account details.</p>
+          <p class="text-sm text-warm-gray mt-1">Your account details stored in Firebase.</p>
         </div>
       </div>
 
@@ -48,17 +77,31 @@ function saveSettings() {
         </label>
         <label class="block">
           <span class="text-xs text-warm-gray tracking-wider uppercase">Email</span>
-          <input v-model="profile.email" type="email" class="input-luxe mt-2" />
+          <input
+            :value="profile.email"
+            type="email"
+            class="input-luxe mt-2 bg-ivory/60 text-warm-gray cursor-not-allowed"
+            readonly
+          />
         </label>
         <label class="block">
           <span class="text-xs text-warm-gray tracking-wider uppercase">Role</span>
-          <input v-model="profile.role" class="input-luxe mt-2" />
+          <input
+            :value="authStore.role"
+            class="input-luxe mt-2 bg-ivory/60 text-warm-gray cursor-not-allowed capitalize"
+            readonly
+          />
         </label>
         <label class="block">
           <span class="text-xs text-warm-gray tracking-wider uppercase">Parish</span>
-          <input v-model="profile.parish" class="input-luxe mt-2" />
+          <input v-model="profile.parish" placeholder="Your parish" class="input-luxe mt-2" />
         </label>
       </div>
+
+      <p class="mt-3 text-xs text-warm-gray">
+        New accounts are created with the <span class="text-gold-dark">guest</span> role. Contact an
+        administrator to request additional permissions.
+      </p>
     </div>
 
     <!-- Preferences -->
@@ -112,9 +155,23 @@ function saveSettings() {
       </div>
     </div>
 
+    <div
+      v-if="authStore.error"
+      role="alert"
+      class="rounded-sm border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600"
+    >
+      {{ authStore.error }}
+    </div>
+
     <!-- Save -->
     <div class="flex items-center gap-4">
-      <button @click="saveSettings" class="btn-gold text-sm">Save Changes</button>
+      <button
+        class="btn-gold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+        :disabled="authStore.loading"
+        @click="saveSettings"
+      >
+        {{ authStore.loading ? 'Saving…' : 'Save Changes' }}
+      </button>
       <Transition name="fade">
         <span v-if="saved" class="text-sm text-gold-dark">Settings saved.</span>
       </Transition>
