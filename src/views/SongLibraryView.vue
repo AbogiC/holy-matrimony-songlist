@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSongsStore } from '../stores/songs'
 import { useAuthStore } from '../stores/auth'
@@ -27,8 +27,22 @@ const fileInput = ref(null)
 
 const isEditing = computed(() => Boolean(editingId.value))
 
+function handleKeydown(event) {
+  if (event.key === 'Escape') requestClose()
+}
+
 onMounted(() => {
   preloadGoogleDrive()
+  window.addEventListener('keydown', handleKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeydown)
+  document.body.style.overflow = ''
+})
+
+watch(formOpen, (open) => {
+  document.body.style.overflow = open ? 'hidden' : ''
 })
 
 const filteredSongs = computed(() => {
@@ -92,6 +106,10 @@ function closeForm() {
   editingId.value = null
   formError.value = ''
   resetFileSelection()
+}
+
+function requestClose() {
+  if (!saving.value) closeForm()
 }
 
 function handleFileSelected(event) {
@@ -205,9 +223,9 @@ async function handleRemoveSong(song) {
       <button
         v-if="authStore.canManage"
         class="btn-gold text-sm w-full sm:w-auto"
-        @click="formOpen ? closeForm() : openAddForm()"
+        @click="openAddForm"
       >
-        {{ formOpen ? 'Cancel' : '+ Add Song' }}
+        + Add Song
       </button>
     </div>
 
@@ -232,74 +250,125 @@ async function handleRemoveSong(song) {
       </RouterLink>
     </div>
 
-    <!-- Add / edit form -->
-    <Transition name="fade">
-      <div v-if="formOpen && authStore.canManage" class="card-luxe p-6">
-        <h4 class="font-serif text-lg mb-4">{{ isEditing ? 'Edit Song' : 'Add New Song' }}</h4>
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          <input v-model="songForm.title" placeholder="Title" class="input-luxe" />
-          <input v-model="songForm.artist" placeholder="Artist" class="input-luxe" />
-          <input v-model="songForm.key" placeholder="Key" class="input-luxe" />
-          <select v-model="songForm.category" class="input-luxe">
-            <option>Classical</option>
-            <option>Contemporary</option>
-            <option>Sacred</option>
-            <option>Pop</option>
-          </select>
-          <input v-model="songForm.duration" placeholder="Duration" class="input-luxe" />
-          <div class="sm:col-span-2 lg:col-span-3 space-y-2">
-            <label class="block text-xs text-warm-gray tracking-[0.12em] uppercase">
-              Sheet Document (PDF / DOC only)
-            </label>
-            <input
-              ref="fileInput"
-              type="file"
-              :accept="DRIVE_ACCEPT"
-              class="block w-full text-sm text-warm-gray file:mr-4 file:px-4 file:py-2.5 
-                     file:rounded-sm file:border-0 file:bg-gold/10 file:text-gold-dark 
-                     file:text-sm hover:file:bg-gold/20 cursor-pointer"
-              @change="handleFileSelected"
-            />
-            <p v-if="selectedFile" class="text-xs text-warm-gray">
-              Ready to upload: <span class="text-charcoal">{{ selectedFile.name }}</span>
-            </p>
-            <p v-else-if="songForm.fileName" class="text-xs text-warm-gray flex items-center gap-2">
-              <a
-                :href="songForm.fileUrl"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-gold-dark hover:text-gold underline"
-              >
-                {{ songForm.fileName }}
-              </a>
+    <!-- Add / edit song modal -->
+    <Teleport to="body">
+      <Transition name="modal">
+        <div
+          v-if="formOpen && authStore.canManage"
+          class="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="isEditing ? 'Edit Song' : 'Add New Song'"
+        >
+          <div
+            class="modal-backdrop absolute inset-0 bg-charcoal/50 backdrop-blur-[2px]"
+            @click="requestClose"
+          ></div>
+
+          <div
+            class="modal-panel relative w-full sm:max-w-2xl max-h-[92vh] sm:max-h-[90vh] flex flex-col
+                   bg-white shadow-2xl rounded-t-xl sm:rounded-sm"
+          >
+            <div class="flex items-start justify-between gap-4 px-5 sm:px-6 py-4 border-b border-champagne/30">
+              <h4 class="font-serif text-lg text-charcoal">
+                {{ isEditing ? 'Edit Song' : 'Add New Song' }}
+              </h4>
               <button
                 type="button"
-                class="text-warm-gray hover:text-red-400 transition-colors"
-                @click="handleRemoveAttachment"
+                aria-label="Close"
+                class="text-2xl leading-none text-warm-gray hover:text-charcoal transition-colors disabled:opacity-50"
+                :disabled="saving"
+                @click="requestClose"
               >
-                Remove
+                &times;
               </button>
-            </p>
+            </div>
+
+            <div class="flex-1 overflow-y-auto px-5 sm:px-6 py-5 space-y-4">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <input v-model="songForm.title" placeholder="Title" class="input-luxe" />
+                <input v-model="songForm.artist" placeholder="Artist" class="input-luxe" />
+                <input v-model="songForm.key" placeholder="Key" class="input-luxe" />
+                <input v-model="songForm.duration" placeholder="Duration" class="input-luxe" />
+                <select v-model="songForm.category" class="input-luxe sm:col-span-2">
+                  <option>Classical</option>
+                  <option>Contemporary</option>
+                  <option>Sacred</option>
+                  <option>Pop</option>
+                </select>
+              </div>
+
+              <div class="space-y-2">
+                <label class="block text-xs text-warm-gray tracking-[0.12em] uppercase">
+                  Sheet Document (PDF / DOC only)
+                </label>
+                <input
+                  ref="fileInput"
+                  type="file"
+                  :accept="DRIVE_ACCEPT"
+                  class="block w-full text-sm text-warm-gray file:mr-4 file:px-4 file:py-2.5 
+                         file:rounded-sm file:border-0 file:bg-gold/10 file:text-gold-dark 
+                         file:text-sm hover:file:bg-gold/20 cursor-pointer"
+                  @change="handleFileSelected"
+                />
+                <p v-if="selectedFile" class="text-xs text-warm-gray">
+                  Ready to upload: <span class="text-charcoal">{{ selectedFile.name }}</span>
+                </p>
+                <p v-else-if="songForm.fileName" class="text-xs text-warm-gray flex items-center gap-2">
+                  <a
+                    :href="songForm.fileUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-gold-dark hover:text-gold underline"
+                  >
+                    {{ songForm.fileName }}
+                  </a>
+                  <button
+                    type="button"
+                    class="text-warm-gray hover:text-red-400 transition-colors"
+                    @click="handleRemoveAttachment"
+                  >
+                    Remove
+                  </button>
+                </p>
+              </div>
+
+              <p v-if="formError" role="alert" class="text-sm text-red-600">{{ formError }}</p>
+            </div>
+
+            <div
+              class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 px-5 sm:px-6 py-4 
+                     border-t border-champagne/30"
+            >
+              <button
+                type="button"
+                class="px-4 py-2.5 text-sm border border-champagne/60 rounded-sm text-warm-gray
+                       hover:bg-champagne/10 transition-colors disabled:opacity-50"
+                :disabled="saving"
+                @click="requestClose"
+              >
+                Cancel
+              </button>
+              <button
+                class="btn-gold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                :disabled="saving"
+                @click="handleSaveSong"
+              >
+                {{
+                  uploading
+                    ? 'Uploading to Drive…'
+                    : saving
+                      ? 'Saving…'
+                      : isEditing
+                        ? 'Update Song'
+                        : 'Save Song'
+                }}
+              </button>
+            </div>
           </div>
-          <button
-            class="btn-gold text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            :disabled="saving"
-            @click="handleSaveSong"
-          >
-            {{
-              uploading
-                ? 'Uploading to Drive…'
-                : saving
-                  ? 'Saving…'
-                  : isEditing
-                    ? 'Update Song'
-                    : 'Save Song'
-            }}
-          </button>
         </div>
-        <p v-if="formError" role="alert" class="mt-3 text-sm text-red-600">{{ formError }}</p>
-      </div>
-    </Transition>
+      </Transition>
+    </Teleport>
 
     <!-- Firestore error -->
     <div
@@ -383,12 +452,38 @@ async function handleRemoveSong(song) {
 </template>
 
 <style scoped>
-.fade-enter-active, .fade-leave-active {
-  transition: all 0.3s ease;
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 0.25s ease;
 }
-.fade-enter-from, .fade-leave-to {
+
+.modal-enter-active .modal-panel,
+.modal-leave-active .modal-panel {
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+
+.modal-enter-from,
+.modal-leave-to {
   opacity: 0;
-  transform: translateY(-8px);
+}
+
+.modal-enter-from .modal-panel,
+.modal-leave-to .modal-panel {
+  transform: translateY(32px);
+  opacity: 0;
+}
+
+@media (min-width: 640px) {
+  .modal-enter-from .modal-panel,
+  .modal-leave-to .modal-panel {
+    transform: translateY(0) scale(0.96);
+  }
+}
+
+@media (max-width: 639px) {
+  .modal-panel {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
 }
 
 @media (max-width: 640px) {

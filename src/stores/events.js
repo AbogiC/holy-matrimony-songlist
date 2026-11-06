@@ -142,6 +142,8 @@ export const useEventsStore = defineStore('events', () => {
       title: (song.title || '').trim(),
       artist: (song.artist || '').trim(),
       moment: (song.moment || '').trim(),
+      librarySongId: String(song.librarySongId || ''),
+      fileUrl: (song.fileUrl || '').trim(),
     }
 
     try {

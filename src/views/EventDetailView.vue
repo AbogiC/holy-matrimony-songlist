@@ -37,6 +37,18 @@ const availableSongs = computed(() => {
   return songsStore.songs.filter((song) => !assignedTitles.has(song.title))
 })
 
+function getSongFileUrl(eventSong) {
+  if (eventSong.fileUrl) return eventSong.fileUrl
+
+  const librarySong = eventSong.librarySongId
+    ? songsStore.songs.find((song) => String(song.id) === String(eventSong.librarySongId))
+    : songsStore.songs.find(
+        (song) => song.title === eventSong.title && song.artist === eventSong.artist
+      )
+
+  return librarySong?.fileUrl || ''
+}
+
 const formattedDate = computed(() => {
   if (!event.value) return ''
   return new Date(`${event.value.date}T00:00:00`).toLocaleDateString('en-US', {
@@ -121,9 +133,11 @@ async function handleAddSong() {
 
   try {
     await eventsStore.addSongToEvent(event.value.id, {
+      librarySongId: song.id,
       title: song.title,
       artist: song.artist,
       moment: moment.value.trim(),
+      fileUrl: song.fileUrl,
     })
     selectedSongId.value = ''
     moment.value = ''
@@ -219,7 +233,7 @@ async function handleRemoveSong(song) {
 
       <template v-else>
         <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-          <div class="flex items-start gap-4">
+          <div class="flex items-start gap-4 min-w-0">
             <div class="w-14 h-14 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
               <svg class="w-7 h-7 text-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
@@ -230,9 +244,9 @@ async function handleRemoveSong(song) {
                 />
               </svg>
             </div>
-            <div>
+            <div class="min-w-0">
               <h3 class="font-serif text-2xl text-charcoal">{{ event.couple }}</h3>
-              <p class="text-sm text-warm-gray mt-1">{{ event.venue }}</p>
+              <p class="text-sm text-warm-gray mt-1 break-words">{{ event.venue }}</p>
               <p class="text-sm text-warm-gray mt-1">{{ formattedDate }}</p>
             </div>
           </div>
@@ -268,7 +282,7 @@ async function handleRemoveSong(song) {
 
     <!-- Song program -->
     <div class="card-luxe p-6">
-      <div class="flex items-center justify-between mb-6">
+      <div class="flex flex-col items-start gap-4 mb-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3 class="font-serif text-xl text-charcoal">Song Program</h3>
           <p class="text-xs text-warm-gray tracking-wider uppercase mt-1">
@@ -324,37 +338,45 @@ async function handleRemoveSong(song) {
         <div
           v-for="song in event.songs"
           :key="song.id"
-          class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 p-4 rounded-sm border border-champagne/30 hover:border-gold/40 hover:bg-champagne/10 transition-all duration-200"
+          class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4 rounded-sm border border-champagne/30 hover:border-gold/40 hover:bg-champagne/10 transition-all duration-200"
         >
-          <div class="flex items-center gap-4 min-w-0">
-            <div class="w-10 h-10 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
-              <svg class="w-5 h-5 text-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="1.5"
-                  d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
-                />
-              </svg>
+          <component
+            :is="getSongFileUrl(song) ? 'a' : 'div'"
+            :href="getSongFileUrl(song) || undefined"
+            :target="getSongFileUrl(song) ? '_blank' : undefined"
+            :rel="getSongFileUrl(song) ? 'noopener noreferrer' : undefined"
+            :aria-label="getSongFileUrl(song) ? `Open sheet music for ${song.title}` : undefined"
+            class="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+            :class="getSongFileUrl(song) ? 'cursor-pointer rounded-sm focus-visible:ring-2 focus-visible:ring-gold/60' : ''"
+          >
+            <div class="flex items-center gap-4 min-w-0">
+              <div class="w-10 h-10 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
+                <svg class="w-5 h-5 text-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.5"
+                    d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3 .895-3 2 1.343 2 3 2 3-.895 3-2-1.343-2-3-2-3 .895-3 2zM9 10l12-3"
+                  />
+                </svg>
+              </div>
+              <div class="min-w-0">
+                <p class="font-medium text-charcoal truncate">{{ song.title }}</p>
+                <p class="text-sm text-warm-gray truncate">{{ song.artist }}</p>
+              </div>
             </div>
-            <div class="min-w-0">
-              <p class="font-medium text-charcoal truncate">{{ song.title }}</p>
-              <p class="text-sm text-warm-gray truncate">{{ song.artist }}</p>
-            </div>
-          </div>
-          <div class="flex items-center justify-between sm:justify-end gap-3 sm:shrink-0">
-            <span class="text-xs px-3 py-1 rounded-full bg-gold/10 text-gold-dark tracking-wider uppercase">
+            <span class="self-start text-xs px-3 py-1 rounded-full bg-gold/10 text-gold-dark tracking-wider uppercase">
               {{ song.moment }}
             </span>
-            <button
-              v-if="authStore.canManage"
-              :disabled="savingSong"
-              @click="handleRemoveSong(song)"
-              class="text-warm-gray hover:text-red-400 transition-colors text-sm disabled:opacity-50"
-            >
-              Remove
-            </button>
-          </div>
+          </component>
+          <button
+            v-if="authStore.canManage"
+            :disabled="savingSong"
+            @click="handleRemoveSong(song)"
+            class="self-end sm:self-auto text-warm-gray hover:text-red-400 transition-colors text-sm disabled:opacity-50"
+          >
+            Remove
+          </button>
         </div>
       </div>
       <div v-else class="py-10 text-center text-warm-gray text-sm">

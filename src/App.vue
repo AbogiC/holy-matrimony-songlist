@@ -21,7 +21,7 @@ const isAuthPage = computed(() => route.meta.authPage === true)
         @click="sidebarOpen = false"
       ></div>
     </Transition>
-    <div class="flex-1 flex flex-col lg:ml-64">
+    <div class="min-w-0 flex-1 flex flex-col lg:ml-64">
       <AppHeader @toggle-sidebar="sidebarOpen = !sidebarOpen" />
       <main class="flex-1 w-full max-w-[1600px] mx-auto p-4 sm:p-6 lg:p-8">
         <RouterView v-slot="{ Component }">

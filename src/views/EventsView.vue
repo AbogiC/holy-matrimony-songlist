@@ -165,7 +165,7 @@ async function handleAddEvent() {
         :to="`/events/${event.id}`"
         class="card-luxe reveal-item p-5 sm:p-6 hover:-translate-y-1 transition-all duration-300 group"
       >
-        <div class="flex items-start justify-between gap-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div class="flex items-start gap-3 sm:gap-4 min-w-0">
             <div class="w-12 h-12 rounded-full bg-gold/10 flex items-center justify-center shrink-0">
               <svg class="w-6 h-6 text-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -178,22 +178,22 @@ async function handleAddEvent() {
               </svg>
             </div>
             <div class="min-w-0">
-              <p class="font-serif text-lg text-charcoal group-hover:text-gold-dark transition-colors truncate">
+              <p class="font-serif text-lg text-charcoal group-hover:text-gold-dark transition-colors break-words">
                 {{ event.couple }}
               </p>
-              <p class="text-sm text-warm-gray mt-1 truncate">{{ event.venue }}</p>
+              <p class="text-sm text-warm-gray mt-1 break-words">{{ event.venue }}</p>
               <p class="text-xs text-warm-gray mt-1">{{ formatDate(event.date) }}</p>
             </div>
           </div>
           <span
-            class="text-xs px-3 py-1 rounded-full tracking-wider uppercase shrink-0"
+            class="self-start text-xs px-3 py-1 rounded-full tracking-wider uppercase shrink-0 sm:self-auto"
             :class="statusClasses[event.status] || statusClasses.planning"
           >
             {{ event.status }}
           </span>
         </div>
 
-        <div class="flex items-center justify-between mt-4 pt-4 border-t border-champagne/30">
+        <div class="flex flex-col items-start gap-2 mt-4 pt-4 border-t border-champagne/30 sm:flex-row sm:items-center sm:justify-between">
           <span class="text-xs text-warm-gray tracking-wider uppercase">
             {{ event.songs.length }} song{{ event.songs.length === 1 ? '' : 's' }} arranged
           </span>
